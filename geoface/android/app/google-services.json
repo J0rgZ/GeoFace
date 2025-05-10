@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "526096861971",
+    "project_id": "geoface-c53eb",
+    "storage_bucket": "geoface-c53eb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:526096861971:android:bb83ef8e21cd764b3ce8e6",
+        "android_client_info": {
+          "package_name": "com.example.geoface"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC6DfoTMGDqpt4OXwXlV0aXCobuP9GaKFE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
