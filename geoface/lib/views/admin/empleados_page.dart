@@ -753,15 +753,19 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
                 // Lista de empleados
                 else
                   SliverPadding(
-                    padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isSmallScreen ? 12 : 24,
+                      vertical: isSmallScreen ? 8 : 16,
+                    ),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
                           final empleado = empleados[index];
-                          
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildEmpleadoCard(empleado, isSmallScreen),
+                          return Column(
+                            children: [
+                              _buildEmpleadoCard(empleado, isSmallScreen),
+                              const SizedBox(height: 12), // Espacio entre tarjetas
+                            ],
                           );
                         },
                         childCount: empleados.length,

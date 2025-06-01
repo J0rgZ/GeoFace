@@ -11,6 +11,7 @@ import 'views/empleado/marcar_asistencia_page.dart';
 import 'views/admin/admin_layout.dart';
 
 class AppRoutes {
+  static const String mainMenu = '/';
   static const String login = '/login';
   static const String dashboard = '/dashboard';
   static const String empleados = '/empleados';
@@ -46,7 +47,13 @@ class AppRoutes {
       case reportes:
         return MaterialPageRoute(builder: (_) => const ReportesPage());
       case marcarAsistencia:
-        return MaterialPageRoute(builder: (_) => const MarcarAsistenciaPage());
+        // Ensure we get the sedeId from arguments
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => MarcarAsistenciaPage(
+            sedeId: args?['sedeId'] ?? '', // Use empty string as fallback
+          )
+        );
       case biometrico:
         final args = settings.arguments as Map<String, dynamic>;
         return MaterialPageRoute(builder: (_) => RegistroBiometricoScreen(empleado: args['empleado']),);

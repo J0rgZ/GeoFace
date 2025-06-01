@@ -4,7 +4,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import '../models/empleado.dart';
-import '../models/biometrico.dart';
 
 class EmpleadoService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -149,29 +148,6 @@ class EmpleadoService {
     } catch (e) {
       debugPrint('Error al registrar datos biométricos: $e');
       return false;
-    }
-  }
-  
-  // Obtener datos biométricos de un empleado
-  Future<Biometrico?> getBiometricoByEmpleadoId(String empleadoId) async {
-    try {
-      final querySnapshot = await _firestore
-          .collection('biometricos')
-          .where('empleadoId', isEqualTo: empleadoId)
-          .limit(1)
-          .get();
-      
-      if (querySnapshot.docs.isNotEmpty) {
-        return Biometrico.fromJson({
-          'id': querySnapshot.docs.first.id,
-          ...querySnapshot.docs.first.data(),
-        });
-      }
-      
-      return null;
-    } catch (e) {
-      debugPrint('Error al obtener datos biométricos: $e');
-      return null;
     }
   }
   

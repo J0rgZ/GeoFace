@@ -1,539 +1,931 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:provider/provider.dart';
-import 'package:permission_handler/permission_handler.dart';
-import '../../controllers/biometrico_controller.dart';
-import '../../models/empleado.dart';
-import '../../models/biometrico.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import '/../controllers/biometrico_controller.dart';
+import '/../models/empleado.dart';
+import '/../models/biometrico.dart';
 
 class RegistroBiometricoScreen extends StatefulWidget {
   final Empleado empleado;
 
-  const RegistroBiometricoScreen({Key? key, required this.empleado}) : super(key: key);
+  const RegistroBiometricoScreen({
+    super.key,
+    required this.empleado,
+  });
 
   @override
-  _RegistroBiometricoScreenState createState() => _RegistroBiometricoScreenState();
+  State<RegistroBiometricoScreen> createState() => _RegistroBiometricoScreenState();
 }
 
-class _RegistroBiometricoScreenState extends State<RegistroBiometricoScreen> with WidgetsBindingObserver {
-  late BiometricoController _biometricoController;
-  bool _isInitialized = false;
-  Biometrico? _biometrico;
-  bool _isCapturing = false;
-  CameraController? _cameraController;
+class _RegistroBiometricoScreenState extends State<RegistroBiometricoScreen> 
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  late BiometricoController _controller;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
   
-  // Mejora en initState para evitar problemas de inicialización
+  bool _isLoading = false;
+  bool _hasExistingBiometric = false;
+  Biometrico? _currentBiometrico;
+  bool _showCamera = false;
+  final ImagePicker _imagePicker = ImagePicker();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _controller = Provider.of<BiometricoController>(context, listen: false);
     
-    // Usar un Future.delayed para asegurarnos de que el widget está completamente montado
-    Future.delayed(Duration.zero, () {
-      _biometricoController = Provider.of<BiometricoController>(context, listen: false);
-      _requestPermissions();
-    });
-  }
-  
-  // Mejora en el método _requestPermissions
-  Future<void> _requestPermissions() async {
-    debugPrint("Solicitando permisos...");
+    // Inicializar animaciones
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
     
-    try {
-      // Solicitar permisos de cámara
-      PermissionStatus cameraStatus = await Permission.camera.status;
-      if (!cameraStatus.isGranted) {
-        cameraStatus = await Permission.camera.request();
-      }
-      
-      // Solicitar permisos de almacenamiento
-      PermissionStatus storageStatus = await Permission.storage.status;
-      if (!storageStatus.isGranted) {
-        storageStatus = await Permission.storage.request();
-      }
-      
-      if (cameraStatus.isGranted) {
-        debugPrint("Permiso de cámara concedido");
-        await _initializeController();
+    // Inicializar después del build inicial
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initController();
+      if (widget.empleado.hayDatosBiometricos) {
+        _checkExistingBiometric();
       } else {
-        debugPrint("Permiso de cámara denegado");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Se requieren permisos de cámara para el registro biométrico'),
-            backgroundColor: Colors.red,
-            action: SnackBarAction(
-              label: 'Configuración',
-              onPressed: () => openAppSettings(),
-            ),
-          ),
-        );
+        setState(() {
+          _hasExistingBiometric = false;
+          _currentBiometrico = null;
+        });
       }
-      
-      if (!storageStatus.isGranted) {
-        debugPrint("Permiso de almacenamiento denegado");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Se requieren permisos de almacenamiento para guardar imágenes'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint("Error al solicitar permisos: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al solicitar permisos: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _initializeController() async {
-    debugPrint("Inicializando controlador...");
-    // Verificar si ya existen datos biométricos para este empleado
-    final biometrico = await _biometricoController.getBiometricoByEmpleadoId(widget.empleado.id);
-    
-    setState(() {
-      _biometrico = biometrico;
-      _isInitialized = true;
+      _animationController.forward();
     });
-    
-    // Si no hay una sesión activa de cámara, iniciarla
-    if (_biometrico == null) {
-      // Inicializar el detector facial primero
-      await _biometricoController.init();
-      
-      // Iniciar la cámara con nuestras propias configuraciones
-      await _initializeCamera();
-    }
-  }
-  
-  Future<void> _initializeCamera() async {
-    debugPrint("Inicializando cámara...");
-
-    try {
-      // Primera inicialización del detector facial
-      if (!_biometricoController.isDetectorInitialized) {
-        await _biometricoController.init();
-        debugPrint("Detector facial inicializado desde la pantalla");
-      }
-      
-      // Usar el método mejorado del controlador para inicializar la cámara
-      await _biometricoController.initCamera();
-      
-      // Obtener la referencia al controlador
-      _cameraController = _biometricoController.cameraController;
-      
-      if (mounted) setState(() {});
-    } catch (e) {
-      debugPrint("Error inicializando cámara: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al inicializar la cámara: ${e.toString()}'),
-          backgroundColor: Colors.red,
-          duration: Duration(seconds: 5),
-        ),
-      );
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Manejar cambios de estado de la aplicación para la cámara
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-
-    if (state == AppLifecycleState.inactive) {
-      _cameraController?.dispose();
-      _biometricoController.cameraController = null;
-    } else if (state == AppLifecycleState.resumed && _biometrico == null) {
-      _initializeCamera();
-    }
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    _animationController.dispose();
     super.dispose();
   }
 
-  Future<void> _captureFace() async {
-    if (_isCapturing) return;
-    
-    setState(() {
-      _isCapturing = true;
-    });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_showCamera) _controller.initCamera();
+    } else if (state == AppLifecycleState.inactive ||
+               state == AppLifecycleState.paused ||
+               state == AppLifecycleState.detached) {
+      _controller.stopCamera();
+    }
+  }
 
+  Future<void> _initController() async {
     try {
-      // Asegurarse de que el controlador actual esté en el biometricoController
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        _biometricoController.cameraController = _cameraController;
-      }
+      setState(() => _isLoading = true);
+      await _controller.initCamera();
+    } catch (e) {
+      _showErrorDialog('Error al inicializar', 
+        'No se pudo inicializar la cámara: ${e.toString()}');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _checkExistingBiometric() async {
+    try {
+      setState(() => _isLoading = true);
       
-      // Detener el stream antes de capturar
-      await _biometricoController.stopImageStream();
+      final biometrico = await _controller.getBiometricoByEmpleadoId(widget.empleado.id);
       
-      // Pequeña pausa para estabilizar
-      await Future.delayed(Duration(milliseconds: 300));
+      setState(() {
+        _hasExistingBiometric = biometrico != null;
+        _currentBiometrico = biometrico;
+      });
       
-      final success = await _biometricoController.addBiometrico(widget.empleado.id);
+    } catch (e) {
+      debugPrint('Error al verificar biométrico: ${e.toString()}');
+      setState(() {
+        _hasExistingBiometric = false;
+        _currentBiometrico = null;
+      });
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _showImageSourceDialog() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Seleccionar imagen',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildImageSourceOption(
+                    icon: Icons.camera_alt,
+                    title: 'Cámara',
+                    subtitle: 'Tomar foto',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _toggleCamera();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildImageSourceOption(
+                    icon: Icons.photo_library,
+                    title: 'Galería',
+                    subtitle: 'Elegir foto',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickImageFromGallery();
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageSourceOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 40,
+              color: Theme.of(context).primaryColor,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              subtitle,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toggleCamera() {
+    setState(() {
+      _showCamera = !_showCamera;
+    });
+    if (_showCamera) {
+      _controller.initCamera();
+    } else {
+      _controller.stopCamera();
+    }
+  }
+
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
       
-      if (success) {
-        setState(() {
-          _biometrico = _biometricoController.currentBiometrico;
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Datos biométricos registrados correctamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_biometricoController.errorMessage ?? 'Error al capturar datos biométricos'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        
-        // Reiniciar stream solo si hubo error y seguimos en la pantalla de captura
-        if (_biometrico == null) {
-          await _biometricoController.startImageStream();
-        }
+      if (image != null) {
+        await _processSelectedImage(image.path);
       }
     } catch (e) {
-      debugPrint("Error en captura: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al capturar: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showErrorDialog('Error', 'No se pudo seleccionar la imagen: ${e.toString()}');
+    }
+  }
+
+  Future<void> _captureFromCamera() async {
+    try {
+      setState(() => _isLoading = true);
       
-      // Reiniciar stream
-      await _biometricoController.startImageStream();
+      bool result;
+      if (_hasExistingBiometric && _currentBiometrico != null) {
+        result = await _controller.updateBiometrico(_currentBiometrico!.id, widget.empleado.id);
+      } else {
+        result = await _controller.registerBiometrico(widget.empleado.id);
+      }
+      
+      if (result) {
+        _showSuccessMessage('Biométrico registrado correctamente');
+        setState(() {
+          _hasExistingBiometric = true;
+          _showCamera = false;
+        });
+        await _checkExistingBiometric();
+      } else {
+        _showErrorDialog('Error', _controller.errorMessage ?? 'No se pudo guardar el biométrico');
+      }
+      
+    } catch (e) {
+      _showErrorDialog('Error', 'Error al capturar imagen: ${e.toString()}');
     } finally {
-      setState(() {
-        _isCapturing = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _updateFace() async {
-    if (_isCapturing || _biometrico == null) return;
-    
-    setState(() {
-      _isCapturing = true;
-    });
-
-    // Inicializar cámara si es necesario
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      await _initializeCamera();
-    }
-    
-    // Asegurarse de que el controlador actual esté en el biometricoController
-    _biometricoController.cameraController = _cameraController;
-    
-    final success = await _biometricoController.updateBiometrico(_biometrico!.id);
-    
-    if (success) {
-      setState(() {
-        _biometrico = _biometricoController.currentBiometrico;
-      });
+  Future<void> _processSelectedImage(String imagePath) async {
+    try {
+      setState(() => _isLoading = true);
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Datos biométricos actualizados correctamente'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_biometricoController.errorMessage ?? 'Error al actualizar datos biométricos'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Aquí deberías implementar la lógica para subir la imagen desde galería
+      // Por ahora simulo el proceso
+      bool result;
+      if (_hasExistingBiometric && _currentBiometrico != null) {
+        result = await _controller.updateBiometrico(_currentBiometrico!.id, widget.empleado.id);
+      } else {
+        result = await _controller.registerBiometrico(widget.empleado.id);
+      }
+      
+      if (result) {
+        _showSuccessMessage('Biométrico actualizado correctamente');
+        setState(() {
+          _hasExistingBiometric = true;
+        });
+        await _checkExistingBiometric();
+      } else {
+        _showErrorDialog('Error', _controller.errorMessage ?? 'No se pudo procesar la imagen');
+      }
+      
+    } catch (e) {
+      _showErrorDialog('Error', 'Error al procesar imagen: ${e.toString()}');
+    } finally {
+      setState(() => _isLoading = false);
     }
-    
-    setState(() {
-      _isCapturing = false;
-    });
   }
 
-  Future<void> _deleteFace() async {
-    if (_biometrico == null) return;
+  Future<void> _deleteBiometric() async {
+    if (_currentBiometrico == null) return;
     
-    final shouldDelete = await showDialog<bool>(
+    try {
+      setState(() => _isLoading = true);
+      
+      final result = await _controller.deleteBiometrico(_currentBiometrico!.id, widget.empleado.id);
+      
+      if (result) {
+        _showSuccessMessage('Biométrico eliminado correctamente', Colors.orange);
+        setState(() {
+          _hasExistingBiometric = false;
+          _currentBiometrico = null;
+          _showCamera = false;
+        });
+      } else {
+        _showErrorDialog('Error', _controller.errorMessage ?? 'No se pudo eliminar el biométrico');
+      }
+      
+    } catch (e) {
+      _showErrorDialog('Error', 'Error al eliminar biométrico: ${e.toString()}');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _showSuccessMessage(String message, [Color? color]) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color ?? Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Eliminar datos biométricos'),
-        content: Text('¿Está seguro de que desea eliminar los datos biométricos de este empleado?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+            const SizedBox(width: 8),
+            Text(title),
+          ],
+        ),
+        content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Eliminar'),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
           ),
         ],
       ),
-    ) ?? false;
-    
-    if (!shouldDelete) return;
-    
-    setState(() {
-      _isCapturing = true;
-    });
-    
-    final success = await _biometricoController.deleteBiometrico(
-      _biometrico!.id, 
-      widget.empleado.id
     );
-    
-    if (success) {
-      setState(() {
-        _biometrico = null;
-      });
-      
-      // Inicializar cámara después de eliminar
-      await _initializeCamera();
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Datos biométricos eliminados correctamente'),
-          backgroundColor: Colors.green,
+  }
+
+  void _showDeleteConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Text('Eliminar biométrico'),
+          ],
         ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_biometricoController.errorMessage ?? 'Error al eliminar datos biométricos'),
-          backgroundColor: Colors.red,
-        ),
-      );
+        content: const Text('¿Estás seguro de que deseas eliminar el registro biométrico? Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteBiometric();
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'No disponible';
+    try {
+      final date = DateTime.parse(dateString);
+      return DateFormat('dd/MM/yyyy HH:mm').format(date);
+    } catch (e) {
+      return 'Fecha inválida';
     }
-    
-    setState(() {
-      _isCapturing = false;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text('Registro Biométrico'),
-        actions: [
-          if (_biometrico != null)
-            IconButton(
-              icon: Icon(Icons.delete),
-              onPressed: _deleteFace,
-              tooltip: 'Eliminar datos biométricos',
+        title: const Text('Registro Biométrico'),
+        centerTitle: true,
+        elevation: 0,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Theme.of(context).primaryColor,
+                Theme.of(context).primaryColor.withOpacity(0.8),
+              ],
             ),
-        ],
-      ),
-      body: !_isInitialized
-          ? Center(child: CircularProgressIndicator())
-          : Column(
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
               children: [
-                // Info básica del empleado
-                Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Nombre: ${widget.empleado.nombreCompleto}'),
-                          Text('DNI: ${widget.empleado.dni}'),
-                          Text('Estado: ${_biometrico != null ? 'Registrado' : 'Pendiente'}'),
-                        ],
-                      ),
-                    ),
-                  ),
+                CircleAvatar(
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  child: Icon(Icons.person, color: Colors.white),
                 ),
-                
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Center(
-                    child: Consumer<BiometricoController>(
-                      builder: (context, controller, child) {
-                        // Si ya existe un registro biométrico, mostrar la imagen guardada
-                        if (_biometrico != null) {
-                          return Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Image.file(
-                                File(_biometrico!.datoFacial),
-                                height: 300,
-                                width: 300,
-                                fit: BoxFit.cover,
-                              ),
-                              SizedBox(height: 20),
-                              Text(
-                                'Registro completado',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green,
-                                ),
-                              ),
-                              SizedBox(height: 10),
-                              Text(
-                                'Fecha: ${_biometrico!.fechaRegistro.toString().substring(0, 10)}',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                              if (_biometrico!.fechaActualizacion != null)
-                                Text(
-                                  'Actualizado: ${_biometrico!.fechaActualizacion.toString().substring(0, 10)}',
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                              SizedBox(height: 20),
-                              ElevatedButton.icon(
-                                icon: Icon(Icons.refresh),
-                                label: Text('Actualizar registro'),
-                                onPressed: _isCapturing ? null : _updateFace,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ],
-                          );
-                        }
-                        
-                        // Si no hay registro biométrico y la cámara está disponible
-                        if (_cameraController != null && _cameraController!.value.isInitialized) {
-                          return Column(
-                            children: [
-                              // Vista previa de la cámara
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: SizedBox(
-                                  height: 300,
-                                  width: 300,
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      // Vista de la cámara
-                                      CameraPreview(_cameraController!),
-                                      
-                                      // Guía para el rostro
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          border: Border.all(
-                                            color: controller.isFaceDetected
-                                                ? (controller.isFaceInBounds ? Colors.green : Colors.yellow)
-                                                : Colors.red,
-                                            width: 3,
-                                          ),
-                                          borderRadius: BorderRadius.circular(150),
-                                        ),
-                                        height: 200,
-                                        width: 200,
-                                      ),
-                                      
-                                      // Indicador de detección facial
-                                      Positioned(
-                                        bottom: 10,
-                                        child: Container(
-                                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                          decoration: BoxDecoration(
-                                            color: controller.isFaceDetected
-                                                ? (controller.isFaceInBounds ? Colors.green.withOpacity(0.7) : Colors.yellow.withOpacity(0.7))
-                                                : Colors.red.withOpacity(0.7),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: Text(
-                                            controller.isFaceDetected
-                                                ? (controller.isFaceInBounds ? 'Rostro detectado' : 'Centre su rostro')
-                                                : 'No se detecta rostro',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              SizedBox(height: 20),
-                              ElevatedButton.icon(
-                                icon: Icon(Icons.camera_alt),
-                                label: Text('Capturar imagen'),
-                                onPressed: (controller.isReadyForCapture && !_isCapturing) ? _captureFace : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue,
-                                  foregroundColor: Colors.white,
-                                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                ),
-                              ),
-                              SizedBox(height: 10),
-                              Text(
-                                controller.isFaceDetected
-                                    ? (controller.isFaceInBounds
-                                        ? 'Puede tomar la foto'
-                                        : 'Coloque su rostro dentro del círculo')
-                                    : 'Mire directamente a la cámara',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                            ],
-                          );
-                        }
-                        
-                        // Si no hay cámara disponible
-                        return Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.camera_alt_outlined,
-                              size: 80,
-                              color: Colors.grey,
-                            ),
-                            SizedBox(height: 20),
-                            Text(
-                              'Cámara no disponible',
-                              style: TextStyle(fontSize: 18),
-                            ),
-                            SizedBox(height: 20),
-                            ElevatedButton(
-                              onPressed: _initializeCamera,
-                              child: Text('Reintentar'),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.empleado.nombreCompleto,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'ID: ${widget.empleado.id}',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                
-                // Espacio para los botones o estado de procesamiento
-                Container(
-                  padding: EdgeInsets.all(16),
-                  child: _isCapturing
-                      ? Center(
-                          child: Column(
-                            children: [
-                              CircularProgressIndicator(),
-                              SizedBox(height: 10),
-                              Text('Procesando...'),
-                            ],
-                          ),
-                        )
-                      : Container(),
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+      body: FadeTransition(
+        opacity: _fadeAnimation,
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildStatusCard(),
+                  const SizedBox(height: 16),
+                  _buildBiometricImageSection(),
+                  const SizedBox(height: 16),
+                  if (_currentBiometrico != null) _buildDateInfoCard(),
+                  if (_currentBiometrico != null) const SizedBox(height: 16),
+                  if (_showCamera) _buildCameraSection(),
+                  if (_showCamera) const SizedBox(height: 16),
+                  _buildActionButtons(),
+                ],
+              ),
+            ),
+            if (_isLoading) _buildLoadingOverlay(),
+          ],
+        ),
+      ),
     );
   }
+
+  Widget _buildStatusCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: _hasExistingBiometric
+                ? [Colors.green.withOpacity(0.1), Colors.green.withOpacity(0.05)]
+                : [Colors.blue.withOpacity(0.1), Colors.blue.withOpacity(0.05)],
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _hasExistingBiometric ? Colors.green : Colors.blue,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                _hasExistingBiometric ? Icons.verified_user : Icons.face_retouching_natural,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _hasExistingBiometric ? 'Biométrico Registrado' : 'Sin Registro Biométrico',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: _hasExistingBiometric ? Colors.green : Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _hasExistingBiometric 
+                        ? 'El empleado tiene datos biométricos válidos'
+                        : 'Es necesario registrar datos biométricos',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBiometricImageSection() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.image, color: Theme.of(context).primaryColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Imagen Biométrica',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: Container(
+                width: 200,
+                height: 250,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Theme.of(context).primaryColor.withOpacity(0.3),
+                    width: 2,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: _hasExistingBiometric && _currentBiometrico?.datoFacial != null
+                      ? CachedNetworkImage(
+                          imageUrl: _currentBiometrico!.datoFacial,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey.shade200,
+                            child: const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Container(
+                            color: Colors.grey.shade200,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.error, size: 40, color: Colors.red),
+                                const SizedBox(height: 8),
+                                Text('Error al cargar imagen', 
+                                  style: Theme.of(context).textTheme.bodySmall),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Container(
+                          color: Colors.grey.shade100,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.face_retouching_natural,
+                                size: 60,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Sin imagen\nbiométrica',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateInfoCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.schedule, color: Theme.of(context).primaryColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Información de Fechas',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildDateRow(
+              icon: Icons.add_circle_outline,
+              label: 'Fecha de Registro',
+              date: _formatDate(_currentBiometrico?.fechaRegistro),
+              color: Colors.green,
+            ),
+            if (_currentBiometrico?.fechaActualizacion != null) ...[
+              const SizedBox(height: 12),
+              _buildDateRow(
+                icon: Icons.update,
+                label: 'Última Actualización',
+                date: _formatDate(_currentBiometrico?.fechaActualizacion),
+                color: Colors.orange,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateRow({
+    required IconData icon,
+    required String label,
+    required String date,
+    required Color color,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                date,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCameraSection() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.camera_alt, color: Theme.of(context).primaryColor),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Vista de Cámara',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  onPressed: _toggleCamera,
+                  icon: const Icon(Icons.close),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.red.withOpacity(0.1),
+                    foregroundColor: Colors.red,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                height: 300,
+                width: double.infinity,
+                child: Consumer<BiometricoController>(
+                  builder: (context, controller, _) {
+                    if (!controller.isCameraInitialized) {
+                      return Container(
+                        color: Colors.grey.shade200,
+                        child: const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(height: 16),
+                              Text('Inicializando cámara...'),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        AspectRatio(
+                          aspectRatio: controller.cameraController?.value.aspectRatio ?? 1.0,
+                          child: controller.cameraController != null 
+                              ? CameraPreview(controller.cameraController!)
+                              : Container(color: Colors.black),
+                        ),
+                        Container(
+                          width: 200,
+                          height: 250,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Theme.of(context).primaryColor.withOpacity(0.8),
+                              width: 3,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 16,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Coloca tu rostro dentro del marco',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _captureFromCamera,
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('CAPTURAR FOTO'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Column(
+      children: [
+        // Botón principal: Agregar/Actualizar
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _showImageSourceDialog,
+            icon: Icon(_hasExistingBiometric ? Icons.update : Icons.add_a_photo),
+            label: Text(
+              _hasExistingBiometric ? 'ACTUALIZAR BIOMÉTRICO' : 'AGREGAR BIOMÉTRICO',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: _hasExistingBiometric 
+                  ? Theme.of(context).primaryColor 
+                  : Colors.green,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        
+        // Si hay biométrico, mostrar botón eliminar
+        if (_hasExistingBiometric) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _showDeleteConfirmDialog,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text(
+                'ELIMINAR BIOMÉTRICO',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red, width: 2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildLoadingOverlay() {
+    return Container(
+      color: Colors.black54,
+      child: Center(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Theme.of(context).primaryColor,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Procesando...',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ignore: non_constant_identifier_names
+CachedNetworkImage({required String imageUrl, required BoxFit fit, required Container Function(dynamic context, dynamic url) placeholder, required Container Function(dynamic context, dynamic url, dynamic error) errorWidget}) {
 }

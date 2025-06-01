@@ -6,7 +6,6 @@ import '../models/empleado.dart';
 import '../models/sede.dart';
 import '../models/asistencia.dart';
 import '../models/usuario.dart';
-import '../models/biometrico.dart';
 
 class FirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -80,6 +79,26 @@ class FirebaseService {
       return Empleado.fromJson(doc.data()!);
     }
     return null;
+  }
+
+  Future<Empleado?> getEmpleadoByDNI(String dni) async {
+    try {
+      final snapshot = await _firestore
+          .collection(AppConfig.empleadosCollection)
+          .where('dni', isEqualTo: dni)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        final data = snapshot.docs.first.data();
+        return Empleado.fromJson(data);
+      }
+
+      return null;
+    } catch (e) {
+      print('Error al buscar empleado por DNI: ${e.toString()}');
+      throw Exception('No se pudo obtener el empleado por DNI');
+    }
   }
 
   Future<void> addEmpleado(Empleado empleado) async {
@@ -159,73 +178,5 @@ class FirebaseService {
 
   Future<void> registrarSalida(Asistencia asistencia) async {
     await _firestore.collection(AppConfig.asistenciasCollection).doc(asistencia.id).update(asistencia.toJson());
-  }
-
-  //Biometricos Services
-  Future<Biometrico?> getBiometricoByEmpleadoId(String empleadoId) async {
-    try {
-      final snapshot = await _firestore
-        .collection('biometricos')
-        .where('empleadoId', isEqualTo: empleadoId)
-        .get();
-        
-      if (snapshot.docs.isEmpty) {
-        return null;
-      }
-      
-      return Biometrico.fromJson(snapshot.docs.first.data());
-    } catch (e) {
-      throw Exception('Error al obtener datos biométricos: ${e.toString()}');
-    }
-  }
-
-  Future<Biometrico?> getBiometricoById(String id) async {
-    try {
-      final snapshot = await _firestore
-        .collection('biometricos')
-        .doc(id)
-        .get();
-        
-      if (!snapshot.exists) {
-        return null;
-      }
-      
-      return Biometrico.fromJson(snapshot.data()!);
-    } catch (e) {
-      throw Exception('Error al obtener datos biométricos: ${e.toString()}');
-    }
-  }
-
-  Future<void> addBiometrico(Biometrico biometrico) async {
-    try {
-      await _firestore
-        .collection('biometricos')
-        .doc(biometrico.id)
-        .set(biometrico.toJson());
-    } catch (e) {
-      throw Exception('Error al agregar datos biométricos: ${e.toString()}');
-    }
-  }
-
-  Future<void> updateBiometrico(Biometrico biometrico) async {
-    try {
-      await _firestore
-        .collection('biometricos')
-        .doc(biometrico.id)
-        .update(biometrico.toJson());
-    } catch (e) {
-      throw Exception('Error al actualizar datos biométricos: ${e.toString()}');
-    }
-  }
-
-  Future<void> deleteBiometrico(String id) async {
-    try {
-      await _firestore
-        .collection('biometricos')
-        .doc(id)
-        .delete();
-    } catch (e) {
-      throw Exception('Error al eliminar datos biométricos: ${e.toString()}');
-    }
   }
 }

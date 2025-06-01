@@ -1,9 +1,9 @@
 class Biometrico {
   final String id;
   final String empleadoId;
-  final String datoFacial;
-  final DateTime fechaRegistro;
-  final DateTime? fechaActualizacion;
+  final String datoFacial; // URL de la imagen en Firebase Storage
+  final String fechaRegistro; // Almacenado como string ISO8601
+  final String? fechaActualizacion; // Almacenado como string ISO8601
 
   Biometrico({
     required this.id,
@@ -13,25 +13,23 @@ class Biometrico {
     this.fechaActualizacion,
   });
 
-  factory Biometrico.fromJson(Map<String, dynamic> json) {
-    return Biometrico(
-      id: json['id'],
-      empleadoId: json['empleadoId'],
-      datoFacial: json['datoFacial'],
-      fechaRegistro: DateTime.parse(json['fechaRegistro']),
-      fechaActualizacion: json['fechaActualizacion'] != null
-          ? DateTime.parse(json['fechaActualizacion'])
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toMap() {
     return {
       'id': id,
       'empleadoId': empleadoId,
       'datoFacial': datoFacial,
-      'fechaRegistro': fechaRegistro.toIso8601String(),
-      'fechaActualizacion': fechaActualizacion?.toIso8601String(),
+      'fechaRegistro': fechaRegistro,
+      'fechaActualizacion': fechaActualizacion,
     };
+  }
+
+  factory Biometrico.fromMap(Map<String, dynamic> map) {
+    return Biometrico(
+      id: map['id'],
+      empleadoId: map['empleadoId'],
+      datoFacial: map['datoFacial'],
+      fechaRegistro: map['fechaRegistro'],
+      fechaActualizacion: map['fechaActualizacion'],
+    );
   }
 }

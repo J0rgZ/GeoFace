@@ -85,10 +85,8 @@ class AsistenciaController extends ChangeNotifier {
       
       await _firebaseService.registrarEntrada(asistencia);
       _asistenciaActiva = asistencia;
-      
       // Actualizar la lista de asistencias añadiendo la nueva
       _asistencias = [..._asistencias, asistencia];
-      
       notifyListeners();
       return true;
     } catch (e) {
@@ -134,13 +132,12 @@ class AsistenciaController extends ChangeNotifier {
       
       await _firebaseService.registrarSalida(asistenciaActualizada);
       _asistenciaActiva = null;
-      
       // Actualizar la asistencia en la lista
       final index = _asistencias.indexWhere((a) => a.id == asistenciaId);
       if (index >= 0) {
         _asistencias[index] = asistenciaActualizada;
       }
-      
+
       notifyListeners();
       return true;
     } catch (e) {
@@ -165,7 +162,7 @@ class AsistenciaController extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   // Nuevo método para obtener todas las asistencias
   Future<void> getAllAsistencias() async {
     _loading = true;

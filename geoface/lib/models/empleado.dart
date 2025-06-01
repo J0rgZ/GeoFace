@@ -48,6 +48,25 @@ class Empleado {
     );
   }
 
+  factory Empleado.fromMap(Map<String, dynamic> map) {
+    return Empleado(
+      id: map['id'],
+      nombre: map['nombre'],
+      apellidos: map['apellidos'],
+      correo: map['correo'],
+      cargo: map['cargo'],
+      sedeId: map['sedeId'],
+      dni: map['dni'],
+      celular: map['celular'],
+      hayDatosBiometricos: map['hayDatosBiometricos'] ?? false,
+      activo: map['activo'],
+      fechaCreacion: DateTime.parse(map['fechaCreacion']),
+      fechaModificacion: map['fechaModificacion'] != null
+          ? DateTime.parse(map['fechaModificacion'])
+          : null,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
